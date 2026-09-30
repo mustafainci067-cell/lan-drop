@@ -1,6 +1,6 @@
 {
   "name": "lan-drop",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Secure peer-to-peer local file transfer — no internet required",
   "private": true,
   "main": "electron/main.js",

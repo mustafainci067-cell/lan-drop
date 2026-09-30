@@ -176,7 +176,7 @@ function createWindow() {
       webSecurity: true,
       preload: path.join(__dirname, 'preload.js'),
     },
-    icon: path.join(__dirname, 'public', 'icon-512.png'),
+    icon: path.join(__dirname, '..', 'public', 'icon-512.png'),
     show: false, // show after ready-to-show to avoid white flash
   });
 
@@ -269,7 +269,7 @@ app.whenReady().then(async () => {
     await startJavaBackend();
     createWindow();
     
-    tray = new Tray(path.join(__dirname, 'public', 'icon-512.png'));
+    tray = new Tray(path.join(__dirname, '..', 'public', 'icon-512.png'));
     const contextMenu = Menu.buildFromTemplate([
       { label: 'Show App', click: () => { if (mainWindow) mainWindow.show(); } },
       { label: 'Quit', click: () => { isQuitting = true; app.quit(); } }
