@@ -30,7 +30,7 @@ export default function Home() {
   const [pin, setPin] = useState<string[]>(['', '', '', '', '', '']);
   const pinRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
+  const [uploadState, setUploadState] = useState<'idle' | 'waiting_for_approval' | 'uploading' | 'success' | 'error' | 'rejected'>('idle');
   const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'error'>('idle');
   const [generatedPin, setGeneratedPin] = useState<string | null>(null);
   const [localIp, setLocalIp] = useState<string>('');
@@ -56,7 +56,7 @@ export default function Home() {
 
   const handleUpload = async () => {
     if (uploadedFiles.length === 0) return;
-    setUploadState('uploading');
+    setUploadState('waiting_for_approval');
     setGeneratedPin(null);
     try {
       const { deriveKeyFromPin, encryptFile, generateRandomPin } = await import('./utils/crypto');
@@ -73,13 +73,40 @@ export default function Home() {
         filename = 'landrop_files.zip';
       }
 
-      // Encrypt the file
+      const deviceName = /Mobile|Android|iPhone/i.test(navigator.userAgent) ? 'Mobile Device' : 'Desktop Browser';
+      const transferRes = await fetch(getApiUrl('/api/request-transfer'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          filename: filename,
+          size: targetFile.size.toString(),
+          senderDevice: deviceName
+        })
+      });
+      if (!transferRes.ok) throw new Error('Transfer request failed');
+      const { transferId } = await transferRes.json();
+
+      let approved = false;
+      while (true) {
+        await new Promise(r => setTimeout(r, 2000));
+        const statusRes = await fetch(getApiUrl(`/api/transfer-status/${transferId}`));
+        if (!statusRes.ok) throw new Error('Transfer status failed');
+        const { status } = await statusRes.json();
+        
+        if (status === 'ACCEPTED') {
+          approved = true;
+          break;
+        } else if (status === 'REJECTED') {
+          setUploadState('rejected');
+          return;
+        }
+      }
+
+      setUploadState('uploading');
+
       const aesKey = await deriveKeyFromPin(pinToUse);
       const { encryptedBlob, ivBase64 } = await encryptFile(targetFile, aesKey);
 
-      // We still need to send the original filename so the receiver knows what to save it as
-      // The Java backend doesn't care, it just sets Content-Disposition
-      // We will append it to the formData as a file with the correct name!
       const formData = new FormData();
       formData.append('files', new File([encryptedBlob], filename, { type: 'application/octet-stream' }));
       formData.append('pin', pinToUse);
@@ -93,7 +120,7 @@ export default function Home() {
       if (!res.ok) throw new Error('Upload failed');
 
       const data = await res.json();
-      setGeneratedPin(data.pin); // This will be the pinToUse that the Java backend saved
+      setGeneratedPin(data.pin);
       setUploadState('success');
       setUploadedFiles([]);
     } catch (err) {
@@ -433,8 +460,11 @@ export default function Home() {
                       </button>
                     </div>
                   ))}
-                  <button onClick={handleUpload} disabled={uploadState === 'uploading'} className="w-full mt-1 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 active:scale-95 text-sm font-semibold text-white transition-all duration-150 shadow-[0_0_20px_0px_rgba(124,58,237,0.4)] disabled:opacity-50 disabled:cursor-not-allowed">
-                    {uploadState === 'uploading' ? 'Sending...' : `Send ${uploadedFiles.length} file${uploadedFiles.length !== 1 ? 's' : ''}`}
+                  <button onClick={handleUpload} disabled={uploadState === 'uploading' || uploadState === 'waiting_for_approval'} className={`w-full mt-1 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 active:scale-95 text-sm font-semibold text-white transition-all duration-150 shadow-[0_0_20px_0px_rgba(124,58,237,0.4)] disabled:opacity-50 disabled:cursor-not-allowed ${uploadState === 'rejected' ? 'bg-red-600 hover:bg-red-500' : ''}`}>
+                    {uploadState === 'uploading' ? 'Sending...' : 
+                     uploadState === 'waiting_for_approval' ? 'Waiting for Approval...' : 
+                     uploadState === 'rejected' ? 'Rejected. Try again' : 
+                     `Send ${uploadedFiles.length} file${uploadedFiles.length !== 1 ? 's' : ''}`}
                   </button>
                 </div>
               )}

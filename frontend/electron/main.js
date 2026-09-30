@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Tray, Menu, Notification } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
@@ -10,6 +10,8 @@ const isDev = !app.isPackaged;
 
 let mainWindow = null;
 let javaProcess = null;
+let tray = null;
+let isQuitting = false;
 
 // ─── Setup IPC ────────────────────────────────────────────────────────────────
 ipcMain.handle('get-local-ip', () => {
@@ -193,9 +195,72 @@ function createWindow() {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   });
 
+  mainWindow.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+}
+
+const notifiedTransfers = new Set();
+
+function startNotificationPolling() {
+  setInterval(() => {
+    const req = http.get(`http://localhost:${JAVA_PORT}/api/pending-transfers`, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const transfers = JSON.parse(data);
+          for (const t of transfers) {
+            if (!notifiedTransfers.has(t.id)) {
+              notifiedTransfers.add(t.id);
+              showTransferNotification(t);
+            }
+          }
+        } catch (e) {}
+      });
+    });
+    req.on('error', () => {});
+  }, 2000);
+}
+
+function showTransferNotification(transfer) {
+  const n = new Notification({
+    title: 'Incoming File - LAN-Drop',
+    body: `${transfer.senderDevice} wants to send ${transfer.filename} (${(transfer.size / 1024 / 1024).toFixed(2)} MB).`,
+    actions: [{ type: 'button', text: 'Accept' }, { type: 'button', text: 'Reject' }]
+  });
+  
+  n.on('action', (event, index) => {
+    const action = index === 0 ? 'ACCEPT' : 'REJECT';
+    const postData = `transferId=${transfer.id}&action=${action}`;
+    const req = http.request({
+      hostname: 'localhost',
+      port: JAVA_PORT,
+      path: '/api/transfer-action',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    });
+    req.write(postData);
+    req.end();
+  });
+  
+  n.on('click', () => {
+    if (mainWindow) {
+      mainWindow.show();
+    }
+  });
+  
+  n.show();
 }
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
@@ -203,6 +268,18 @@ app.whenReady().then(async () => {
   try {
     await startJavaBackend();
     createWindow();
+    
+    tray = new Tray(path.join(__dirname, 'public', 'icon-512.png'));
+    const contextMenu = Menu.buildFromTemplate([
+      { label: 'Show App', click: () => { if (mainWindow) mainWindow.show(); } },
+      { label: 'Quit', click: () => { isQuitting = true; app.quit(); } }
+    ]);
+    tray.setToolTip('LAN-Drop');
+    tray.setContextMenu(contextMenu);
+    tray.on('click', () => { if (mainWindow) mainWindow.show(); });
+    
+    startNotificationPolling();
+    
   } catch (err) {
     dialog.showErrorBox(
       'LAN-Drop — Backend Error',
@@ -213,20 +290,10 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  // Kill the Java process cleanly when all windows are closed
-  if (javaProcess) {
-    console.log('[Electron] Killing Java backend process...');
-    javaProcess.kill('SIGTERM');
-    // Force kill after 3 seconds if it hasn't exited
-    setTimeout(() => {
-      if (javaProcess) {
-        javaProcess.kill('SIGKILL');
-        javaProcess = null;
-      }
-    }, 3000);
+  // We only close if quitting
+  if (isQuitting && process.platform !== 'darwin') {
+    app.quit();
   }
-  // On macOS apps stay open until Cmd+Q; on Windows/Linux, quit on last window close
-  if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('activate', () => {
@@ -234,7 +301,9 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
+  isQuitting = true;
   if (javaProcess) {
+    console.log('[Electron] Killing Java backend process...');
     javaProcess.kill('SIGTERM');
     javaProcess = null;
   }

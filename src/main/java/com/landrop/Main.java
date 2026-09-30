@@ -15,9 +15,16 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import java.util.UUID;
+import java.util.stream.Collectors;
+
 public class Main {
     private static final Logger log = LoggerFactory.getLogger(Main.class);
     private static final Map<String, FileData> fileStorage = new ConcurrentHashMap<>();
+
+    enum TransferStatus { PENDING, ACCEPTED, REJECTED }
+    record TransferRequest(String id, String filename, long size, String senderDevice, TransferStatus status) {}
+    private static final Map<String, TransferRequest> pendingTransfers = new ConcurrentHashMap<>();
 
     record FileData(byte[] content, String filename, String contentType, String iv, String senderPk) {}
 
@@ -44,6 +51,50 @@ public class Main {
         app.get("/api/ping", ctx -> ctx.result("LAN-Drop API is running"));
         
         app.get("/api/devices", ctx -> ctx.json(discoveryService.getActiveDevices()));
+        
+        app.post("/api/request-transfer", ctx -> {
+            String filename = ctx.formParam("filename");
+            long size = Long.parseLong(ctx.formParam("size") != null ? ctx.formParam("size") : "0");
+            String senderDevice = ctx.formParam("senderDevice");
+            if (senderDevice == null) senderDevice = "Unknown Device";
+            
+            String id = UUID.randomUUID().toString();
+            TransferRequest req = new TransferRequest(id, filename, size, senderDevice, TransferStatus.PENDING);
+            pendingTransfers.put(id, req);
+            
+            ctx.json(Map.of("transferId", id, "status", "PENDING"));
+        });
+
+        app.get("/api/transfer-status/{id}", ctx -> {
+            String id = ctx.pathParam("id");
+            TransferRequest req = pendingTransfers.get(id);
+            if (req == null) {
+                ctx.status(404).result("Transfer not found");
+                return;
+            }
+            ctx.json(Map.of("transferId", id, "status", req.status().name()));
+        });
+
+        app.get("/api/pending-transfers", ctx -> {
+            List<TransferRequest> pending = pendingTransfers.values().stream()
+                .filter(r -> r.status() == TransferStatus.PENDING)
+                .collect(Collectors.toList());
+            ctx.json(pending);
+        });
+
+        app.post("/api/transfer-action", ctx -> {
+            String id = ctx.formParam("transferId");
+            String action = ctx.formParam("action");
+            
+            TransferRequest req = pendingTransfers.get(id);
+            if (req != null) {
+                TransferStatus newStatus = "ACCEPT".equalsIgnoreCase(action) ? TransferStatus.ACCEPTED : TransferStatus.REJECTED;
+                pendingTransfers.put(id, new TransferRequest(id, req.filename(), req.size(), req.senderDevice(), newStatus));
+                ctx.result("OK");
+            } else {
+                ctx.status(404).result("Not found");
+            }
+        });
         
         app.post("/api/upload", ctx -> {
             List<UploadedFile> files = ctx.uploadedFiles("files");
