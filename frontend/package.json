@@ -1,0 +1,89 @@
+{
+  "name": "lan-drop",
+  "version": "1.0.0",
+  "description": "Secure peer-to-peer local file transfer — no internet required",
+  "private": true,
+  "main": "electron/main.js",
+  "homepage": "./",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "electron:start": "node scripts/electron-dev.js",
+    "electron:dev": "concurrently --kill-others-on-fail -n NEXT,ELECTRON \"cross-env NODE_ENV=development next dev\" \"node scripts/electron-dev.js\"",
+    "electron:build": "cross-env ELECTRON_BUILD=1 next build && electron-builder build --win --publish never",
+    "dist": "npm run electron:build"
+  },
+  "dependencies": {
+    "next": "16.3.6",
+    "next-pwa": "^5.6.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-qr-code": "^2.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.0.12",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.6",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "wait-on": "^8.0.3"
+  },
+  "author": "LAN-Drop",
+  "build": {
+    "appId": "com.landrop.app",
+    "productName": "LAN-Drop",
+    "copyright": "Copyright © 2026 LAN-Drop",
+    "asar": false,
+    "directories": {
+      "buildResources": "build-resources",
+      "output": "dist-out"
+    },
+    "files": [
+      "electron/**/*",
+      "out/**/*",
+      "public/**/*",
+      "!node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../target/lan-drop-server.jar",
+        "to": "lan-drop-server.jar"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/icon-512.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "LAN-Drop"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "public/icon-512.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "public/icon-512.png"
+    }
+  }
+}
