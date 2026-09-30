@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Tray, Menu, Notification } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Tray, Menu, Notification, nativeImage } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
@@ -269,7 +269,9 @@ app.whenReady().then(async () => {
     await startJavaBackend();
     createWindow();
     
-    tray = new Tray(path.join(__dirname, '..', 'public', 'icon-512.png'));
+    const iconPath = path.join(__dirname, '..', 'public', 'icon-512.png');
+    const trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
+    tray = new Tray(trayIcon);
     const contextMenu = Menu.buildFromTemplate([
       { label: 'Show App', click: () => { if (mainWindow) mainWindow.show(); } },
       { label: 'Quit', click: () => { isQuitting = true; app.quit(); } }
