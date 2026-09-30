@@ -19,7 +19,7 @@ public class Main {
     private static final Logger log = LoggerFactory.getLogger(Main.class);
     private static final Map<String, FileData> fileStorage = new ConcurrentHashMap<>();
 
-    record FileData(byte[] content, String filename, String contentType) {}
+    record FileData(byte[] content, String filename, String contentType, String iv, String senderPk) {}
 
     public static void main(String[] args) {
         DiscoveryService discoveryService = new DiscoveryService();
@@ -52,25 +52,18 @@ public class Main {
                 return;
             }
             
-            String pin = String.format("%06d", new Random().nextInt(1000000));
+            String providedPin = ctx.formParam("pin");
+            String pin = (providedPin != null && !providedPin.trim().isEmpty()) 
+                         ? providedPin 
+                         : String.format("%06d", new Random().nextInt(1000000));
             
-            if (files.size() == 1) {
-                UploadedFile file = files.get(0);
-                fileStorage.put(pin, new FileData(file.content().readAllBytes(), file.filename(), file.contentType()));
-            } else {
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                try (ZipOutputStream zos = new ZipOutputStream(baos)) {
-                    for (UploadedFile file : files) {
-                        ZipEntry entry = new ZipEntry(file.filename());
-                        zos.putNextEntry(entry);
-                        zos.write(file.content().readAllBytes());
-                        zos.closeEntry();
-                    }
-                }
-                fileStorage.put(pin, new FileData(baos.toByteArray(), "landrop_files.zip", "application/zip"));
-            }
+            String iv = ctx.formParam("iv");
+            String senderPk = ctx.formParam("senderPk");
             
-            log.info("Stored file(s) with PIN: {}", pin);
+            UploadedFile file = files.get(0); // Frontend always sends exactly 1 file (either raw or zip)
+            fileStorage.put(pin, new FileData(file.content().readAllBytes(), file.filename(), file.contentType(), iv, senderPk));
+            
+            log.info("Stored file with PIN: {}", pin);
             ctx.json(Map.of("pin", pin));
         });
 
@@ -83,6 +76,9 @@ public class Main {
             }
             
             ctx.header("Content-Disposition", "attachment; filename=\"" + data.filename() + "\"");
+            if (data.iv() != null) ctx.header("X-Encrypted-IV", data.iv());
+            if (data.senderPk() != null) ctx.header("X-Sender-PK", data.senderPk());
+            
             ctx.contentType(data.contentType());
             ctx.result(data.content());
         });

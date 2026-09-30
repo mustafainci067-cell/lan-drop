@@ -59,8 +59,31 @@ export default function Home() {
     setUploadState('uploading');
     setGeneratedPin(null);
     try {
+      const { deriveKeyFromPin, encryptFile, generateRandomPin } = await import('./utils/crypto');
+      const pinToUse = generateRandomPin();
+      
+      let targetFile: File | Blob = uploadedFiles[0];
+      let filename = uploadedFiles[0].name;
+
+      if (uploadedFiles.length > 1) {
+        const JSZip = (await import('jszip')).default;
+        const zip = new JSZip();
+        uploadedFiles.forEach(file => zip.file(file.name, file));
+        targetFile = await zip.generateAsync({ type: 'blob' });
+        filename = 'landrop_files.zip';
+      }
+
+      // Encrypt the file
+      const aesKey = await deriveKeyFromPin(pinToUse);
+      const { encryptedBlob, ivBase64 } = await encryptFile(targetFile, aesKey);
+
+      // We still need to send the original filename so the receiver knows what to save it as
+      // The Java backend doesn't care, it just sets Content-Disposition
+      // We will append it to the formData as a file with the correct name!
       const formData = new FormData();
-      uploadedFiles.forEach(file => formData.append('files', file));
+      formData.append('files', new File([encryptedBlob], filename, { type: 'application/octet-stream' }));
+      formData.append('pin', pinToUse);
+      formData.append('iv', ivBase64);
 
       const res = await fetch(getApiUrl('/api/upload'), {
         method: 'POST',
@@ -70,7 +93,7 @@ export default function Home() {
       if (!res.ok) throw new Error('Upload failed');
 
       const data = await res.json();
-      setGeneratedPin(data.pin);
+      setGeneratedPin(data.pin); // This will be the pinToUse that the Java backend saved
       setUploadState('success');
       setUploadedFiles([]);
     } catch (err) {
@@ -85,6 +108,7 @@ export default function Home() {
     setDownloadState('downloading');
 
     try {
+      const { deriveKeyFromPin, decryptFile } = await import('./utils/crypto');
       const res = await fetch(getApiUrl(`/api/download/${pinStr}`));
       if (!res.ok) throw new Error('Download failed');
 
@@ -95,8 +119,17 @@ export default function Home() {
         if (match && match[1]) filename = match[1];
       }
 
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
+      const ivBase64 = res.headers.get('X-Encrypted-IV');
+      const encryptedBlob = await res.blob();
+      
+      let finalBlob = encryptedBlob;
+      if (ivBase64) {
+        // It's encrypted!
+        const aesKey = await deriveKeyFromPin(pinStr);
+        finalBlob = await decryptFile(encryptedBlob, aesKey, ivBase64);
+      }
+
+      const url = window.URL.createObjectURL(finalBlob);
       const a = document.createElement('a');
       a.href = url;
       a.download = filename;
